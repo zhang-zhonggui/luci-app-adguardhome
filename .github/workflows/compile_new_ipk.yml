@@ -1,11 +1,11 @@
 name: Compile The New Version Adguardhome
 
-on: 
+on:
   push:
     branches:
       - master
     paths:
-      - 'lluci-app-adguardhome/Makefile'
+      - 'luci-app-adguardhome/Makefile'
   workflow_dispatch:
 
 jobs:
@@ -15,75 +15,77 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       current_version: ${{ steps.current_version.outputs.version }}
     steps:
-      - name: Clone Repository
+      - name: 克隆仓库
         uses: actions/checkout@v3
         with:
           ref: ${{ github.ref_name }}
 
-      - name: New Version
+      - name: 新版本
         id: version
         run: |
           echo "version=$(grep 'PKG_VERSION:=' ./luci-app-adguardhome/Makefile |awk -F '=' '{print $2}')" >> $GITHUB_OUTPUT
           echo "New Version: $(grep 'PKG_VERSION:=' ./luci-app-adguardhome/Makefile |awk -F '=' '{print $2}')"
-      - name: Clone Repository
-        uses: actions/checkout@v3
-        with:
-          ref: master
 
-      - name: Current Version
+      - name: 当前版本
         id: current_version
         run: |
-          echo "version=$(sed -n 1p ./${{ github.ref_name }}/version |awk -F '-' '{print $1}' |awk -F 'v' '{print $2}')" >> $GITHUB_OUTPUT
-          echo "Current Version: $(sed -n 1p ./${{ github.ref_name }}/version |awk -F '-' '{print $1}' |awk -F 'v' '{print $2}')"
+          echo "version=$(sed -n 1p ./version | awk -F '-' '{print $1}' | awk -F 'v' '{print $2}')" >> $GITHUB_OUTPUT
+          echo "Current Version: $(sed -n 1p ./version | awk -F '-' '{print $1}' | awk -F 'v' '{print $2}')"
+
   Compile:
     runs-on: ubuntu-latest
     needs: Get-Version
     if: ${{ needs.Get-Version.outputs.version != needs.Get-Version.outputs.current_version }}
     steps:
-      - name: Clone OpenClash dev Repository
+      - name: 设置 TERM 环境变量
+        run: echo "TERM=xterm-256color" >> $GITHUB_ENV
+
+      - name: 克隆 OpenClash dev 仓库  # 此步骤似乎不必要，请参阅下面的注释
         uses: actions/checkout@v3
         with:
           ref: ${{ github.ref_name }}
+
       - name: Apt Update
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          # sudo apt-get update
+          # sudo apt-get update # 通常不需要，运行器是最新的
           sudo apt-get -y install curl git tar wget
-      - name: Install OpenWrt SDK
+
+      - name: 安装 OpenWrt SDK
         run: |
           cd ..
           mkdir tmp
           curl -SLk --connect-timeout 30 --retry 2 "https://archive.openwrt.org/releases/23.05.3/targets/x86/64/openwrt-sdk-23.05.3-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz" -o "./tmp/SDK.tar.xz"
-          cd \tmp
+          cd tmp
           tar xf SDK.tar.xz
           mv "openwrt-sdk-23.05.3-x86-64_gcc-12.3.0_musl.Linux-x86_64" "SDK"
-      - name: Change Source Codes Version
+
+      - name: 更改源代码版本
         run: |
           echo "v${{ needs.Get-Version.outputs.version }}-beta" > ./version
           echo "https://img.shields.io/badge/New Release-v${{ needs.Get-Version.outputs.version }}--beta-orange.svg" >> ./version
-      - name: Copy Source Codes
+
+      - name: 复制源代码
         run: |
           cd ..
           mkdir tmp/SDK/package/luci-app-adguardhome
           cp -rf "./luci-app-adguardhome/." "./tmp/SDK/package/luci-app-adguardhome/"
-      - name: Compile IPK
+
+      - name: 编译 IPK
         run: |
-          cd ..
-          cd tmp/SDK
+          cd ../tmp/SDK
+          make defconfig
           make package/luci-app-adguardhome/compile V=99
-      - name: Commit and Push New Version
+
+      - name: 提交并推送新版本
         run: |
           rm -rf ./luci-app-adguardhome_*
-          cd ..
-          cp "./tmp/SDK/bin/x86_64/packages/base/luci-app-adguardhome_${{ needs.Get-Version.outputs.version }}-beta_all.ipk" "./zhang-zhonggui/luci-app-adguardhome_${{ needs.Get-Version.outputs.version }}-beta_all.ipk"
-          cd \zhang-zhonggui
+          cd ../tmp/SDK/bin/packages/*/base
+          cp ./luci-app-adguardhome*.ipk ../../../../../
+          cd ../../../../../
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add .
           git commit -m "Auto Release: v${{ needs.Get-Version.outputs.version }}-beta"
           git push
-      - name: Switch Repository to Package
-        uses: actions/checkout@v3
-        with:
-          ref: package
